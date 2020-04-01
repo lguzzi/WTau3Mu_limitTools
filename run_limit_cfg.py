@@ -1,6 +1,15 @@
 import ROOT
 import sys
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--bdt_cut_barrel', default = 0.996, type = float)
+parser.add_argument('--bdt_cut_endcap', default = 0.996, type = float)
+parser.add_argument('--batch', action = 'store_true')
+args = parser.parse_args()
+
+ROOT.gROOT.SetBatch(args.batch)
+
 sys.path.append('./libs/')
 from config_cls     import Configuration
 from category_cls   import Category
@@ -22,6 +31,8 @@ baseline += " & (   ((abs(cand_refit_mass12-0.782)<0.02)*(cand_charge12==0))    
                     ((abs(cand_refit_mass23-0.782)<0.02)*(cand_charge23==0))    ) == 0"
 
 baseline += " & abs(cand_charge) == 1 & abs(cand_refit_tau_mass - 1.8) < 0.2"
+baseline = ' '.join(baseline.split())
+
 
 path_data = "samples/background_10jan2020.root"
 path_mc   = "samples/signal_10jan2020.root"
@@ -34,6 +45,7 @@ getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_mass', '3-#mu mass'   
 getattr(wspace, 'import')(ROOT.RooRealVar('bdt'                , 'bdt'                 , -1 , 1))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_charge'        , 'charge'              , -4 , 4))
 getattr(wspace, 'import')(ROOT.RooRealVar('mcweight'           , 'mcweight'            ,  0., 5))
+getattr(wspace, 'import')(ROOT.RooRealVar('weight'             , 'weight'              ,  0., 20))  ## NOTE careful with the ranges
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_eta' , 'cand_refit_tau_eta'  , -5., 5))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_mass12'  , 'cand_refit_mass12'   ,  0., 2))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_mass13'  , 'cand_refit_mass13'   ,  0., 2))
@@ -58,7 +70,7 @@ wspace.var("cand_refit_tau_mass").setRange("sig_region", *sig_range)
 wspace.factory("RooGaussian::sig(cand_refit_tau_mass, mean[1.77, 1.7, 1.8], sigma[0.02, 0.001, 0.5])")
 
 # see this https://root-forum.cern.ch/t/fit-only-the-sidebands-yield-on-full-range-using-rooextendpdf/31868
-slope = ROOT.RooRealVar('a0{CAT}', '', -0.001, -1e3, 1e3)
+slope = ROOT.RooRealVar('slope', '', -0.001, -1e3, 1e3)
 nbkg  = ROOT.RooRealVar('nbkg', 'nbkg', 2000, 0, 550000)
 expo  = ROOT.RooPolynomial('bkg_expo', 'bkg_expo', wspace.var('cand_refit_tau_mass'), ROOT.RooArgList(slope))
 
@@ -67,10 +79,16 @@ getattr(wspace, 'import')(expomodel)
 
 ## CREATE THE CFG OBJECT
 ##
-cfg = Configuration(baseline = baseline, bkg_file_path = path_data, sig_file_path = path_mc, tree_name = 'tree')
 
-barrel = Category(name = 'barrel', selection = "bdt > 0.996 & abs(cand_refit_tau_eta) <  1.6", wspace = wspace.Clone())
-endcap = Category(name = 'endcap', selection = "bdt > 0.996 & abs(cand_refit_tau_eta) >= 1.6", wspace = wspace.Clone())
+## NOTE match exactly Riccardo's script (round norm factor to float)
+FACTOR = float('%f' %(90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7))  / (90480./2.e6*(8580+11370)*0.1138/0.1063*1E-7)
+
+cfg = Configuration(baseline = baseline, bkg_file_path = path_data, sig_file_path = path_mc, tree_name = 'tree',
+    sig_norm = FACTOR ## fix small bug in ntuple production (wrong norm at ntuple definition)
+)
+
+barrel = Category(name = 'barrel', working_point = '0.996', selection = "bdt > {CUT} & abs(cand_refit_tau_eta) <  1.6".format(CUT = args.bdt_cut_barrel), wspace = wspace.Clone())
+endcap = Category(name = 'endcap', working_point = '0.996', selection = "bdt > {CUT} & abs(cand_refit_tau_eta) >= 1.6".format(CUT = args.bdt_cut_endcap), wspace = wspace.Clone())
 
 cfg.add_category(barrel)
 cfg.add_category(endcap)
@@ -78,6 +96,6 @@ cfg.add_category(endcap)
 ## RUN COMBINE
 ##
 cfg.fit_model()
-#cfg.write_datacards()
-#cfg.combine_datacards()
-#cfg.run_combine()
+cfg.write_datacards()
+cfg.combine_datacards()
+cfg.run_combine(100)
