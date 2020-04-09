@@ -3,8 +3,9 @@ import sys
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--bdt_cut_barrel', default = 0.996, type = float)
-parser.add_argument('--bdt_cut_endcap', default = 0.996, type = float)
+parser.add_argument('--bdt_cut_barrel', default = 0.996    , type = float)
+parser.add_argument('--bdt_cut_endcap', default = 0.996    , type = float)
+parser.add_argument('--outdir'        , default = 'result' , type = str  )
 parser.add_argument('--batch', action = 'store_true')
 args = parser.parse_args()
 
@@ -67,12 +68,13 @@ wspace.var("cand_refit_tau_mass").setBins(nbins)
 wspace.var("cand_refit_tau_mass").setRange("left"  , *left_range )
 wspace.var("cand_refit_tau_mass").setRange("right" , *right_range)
 wspace.var("cand_refit_tau_mass").setRange("sig_region", *sig_range)
-wspace.factory("RooGaussian::sig(cand_refit_tau_mass, mean[1.77, 1.7, 1.8], sigma[0.02, 0.001, 0.5])")
+wspace.factory("RooGaussian::sig(cand_refit_tau_mass, mean[1.78, -1.7, 1.9], sigma[0.02, 0, 0.1])")
 
 # see this https://root-forum.cern.ch/t/fit-only-the-sidebands-yield-on-full-range-using-rooextendpdf/31868
 slope = ROOT.RooRealVar('slope', '', -0.001, -1e3, 1e3)
 nbkg  = ROOT.RooRealVar('nbkg', 'nbkg', 2000, 0, 550000)
-expo  = ROOT.RooPolynomial('bkg_expo', 'bkg_expo', wspace.var('cand_refit_tau_mass'), ROOT.RooArgList(slope))
+#expo  = ROOT.RooPolynomial('bkg_expo', 'bkg_expo', wspace.var('cand_refit_tau_mass'), ROOT.RooArgList(slope))
+expo  = ROOT.RooExponential('bkg_expo', 'bkg_expo', wspace.var('cand_refit_tau_mass'), slope)
 
 expomodel = ROOT.RooAddPdf('bkg', '', ROOT.RooArgList(expo), ROOT.RooArgList(nbkg))
 getattr(wspace, 'import')(expomodel)
@@ -84,11 +86,12 @@ getattr(wspace, 'import')(expomodel)
 FACTOR = float('%f' %(90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7))  / (90480./2.e6*(8580+11370)*0.1138/0.1063*1E-7)
 
 cfg = Configuration(baseline = baseline, bkg_file_path = path_data, sig_file_path = path_mc, tree_name = 'tree',
-    sig_norm = FACTOR ## fix small bug in ntuple production (wrong norm at ntuple definition)
+    sig_norm   = FACTOR, ## fix small bug in ntuple production (wrong norm at ntuple definition)
+    result_dir = args.outdir,
 )
 
-barrel = Category(name = 'barrel', working_point = '0.996', selection = "bdt > {CUT} & abs(cand_refit_tau_eta) <  1.6".format(CUT = args.bdt_cut_barrel), wspace = wspace.Clone())
-endcap = Category(name = 'endcap', working_point = '0.996', selection = "bdt > {CUT} & abs(cand_refit_tau_eta) >= 1.6".format(CUT = args.bdt_cut_endcap), wspace = wspace.Clone())
+barrel = Category(name = 'barrel', working_point = str(args.bdt_cut_barrel), selection = "bdt > {CUT} & abs(cand_refit_tau_eta) <  1.6".format(CUT = args.bdt_cut_barrel), wspace = wspace.Clone())
+endcap = Category(name = 'endcap', working_point = str(args.bdt_cut_endcap), selection = "bdt > {CUT} & abs(cand_refit_tau_eta) >= 1.6".format(CUT = args.bdt_cut_endcap), wspace = wspace.Clone())
 
 cfg.add_category(barrel)
 cfg.add_category(endcap)
@@ -98,4 +101,4 @@ cfg.add_category(endcap)
 cfg.fit_model()
 cfg.write_datacards()
 cfg.combine_datacards()
-cfg.run_combine(100)
+cfg.run_combine(ntoys = 5000)

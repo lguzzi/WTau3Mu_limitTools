@@ -3,10 +3,11 @@ import os
 
 ## TODO
 ## - should I apply the correct signal normalization at ntuple level or right here by default?
+## - check difference in ROOT and RooFit Integral() value (difference of about 1e-4)
 
 COMBINE_CMD = 'combineCards.py {IN} > {OUT}'
 CREATE_MODEL_CMD = 'text2workspace.py {IN} -o {OUT}'
-RUN_COMBINE_HYBRID_CMD  = "combine -n {LABEL} -M {METHOD} --testStat={STAT} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_scan_central_{CL}_WP_{LABEL}.pdf' --rMin 0 --rMax 10 --setParameterRanges {PARAMETERS} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
+RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_scan_central_{CL}_WP_{LABEL}.pdf' --rMin 0 --rMax 50 --setParameterRanges {PARAMETERS} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
 
 class Configuration:
     def __init__(self,  baseline, sig_file_path, bkg_file_path, tree_name,
@@ -55,7 +56,7 @@ class Configuration:
 
         print '[INFO] merging datacards'
         
-        inputs = ['{NAM}={DTC}/datacard_{NAM}.txt'.format(DTC = self.datacard_dir, NAM = cc.name) for cc in self.categories]
+        inputs = ['{NAM}={DTC}/datacard_{CAT}.txt'.format(DTC = self.datacard_dir, NAM = cc.name, CAT = cc.label) for cc in self.categories]
         input_str                   = ' '.join(inputs)
         
         output_datacard_path   = self.datacard_dir + '/datacard_comb_' + '_'.join([cc.label for cc in self.categories]) + '.txt'
@@ -74,10 +75,9 @@ class Configuration:
 
         label = '_'.join([cc.label for cc in self.categories])
 
-        parameters_selection =  ['bkgNorm_barrel$wpb=0,1000000'] + \
-                                ['bkgNorm_{CAT}=0,1000000:a0_{CAT}=-100,100'.format(CAT = cc.label) for cc in self.categories]
+        parameters_selection =  ['bkgNorm_{CAT}=0,1000000:a0_{CAT}=-100,100'.format(CAT = cc.label) for cc in self.categories]
         parameters_selection =  ':'.join(parameters_selection)
-
+        
         os.system(RUN_COMBINE_HYBRID_CMD.format(    LABEL       = label,
                                                     MODEL       = self.output_model_path,
                                                     NTOYS       = ntoys,
