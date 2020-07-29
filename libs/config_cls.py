@@ -1,18 +1,20 @@
 import ROOT
 import os
+from random import uniform
+from time import sleep
 
 ## TODO
-## - should I apply the correct signal normalization at ntuple level or right here by default?
-## - check difference in ROOT and RooFit Integral() value (difference of about 1e-4)
+## - should I apply the correct signal normalization at ntuple level or right here by default? [DONE]
+## - check difference in ROOT and RooFit Integral() value (difference of about 1e-4) [DONE]
 
 COMBINE_CMD = 'combineCards.py {IN} > {OUT}'
 CREATE_MODEL_CMD = 'text2workspace.py {IN} -o {OUT}'
-RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_scan_central_{CL}_WP_{LABEL}.pdf' --rMin 0 --rMax 50 --setParameterRanges {PARAMETERS} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
+RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_scan_central_{CL}_WP_{LABEL}.pdf' --rMin 0 --rMax 10 --setParameterRanges {PARAMETERS} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
 
 class Configuration:
     def __init__(self,  baseline, sig_file_path, bkg_file_path, tree_name,
-                        pdf_dir = 'pdf', datacard_dir = 'datacards', result_dir = 'result',
-                        sig_norm = 90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7):
+                        pdf_dir = 'pdf', datacard_dir = 'datacards', result_dir = 'result', work_dir = '.',
+                        sig_norm = 1):
         self.baseline      = baseline
         self.sig_file_path = sig_file_path
         self.bkg_file_path = bkg_file_path
@@ -21,10 +23,12 @@ class Configuration:
         self.pdf_dir       = pdf_dir             
         self.categories    = []
 
-        self.pdf_dir       = pdf_dir 
-        self.datacard_dir  = datacard_dir 
-        self.result_dir    = result_dir 
+        self.pdf_dir       = '/'.join([work_dir, pdf_dir ])
+        self.datacard_dir  = '/'.join([work_dir, datacard_dir ])
+        self.result_dir    = '/'.join([work_dir, result_dir ])
 
+        ## mutlithread mkdir safety
+        sleep(uniform(1, 10))
         if not os.path.exists(self.pdf_dir)     : os.mkdir(self.pdf_dir)
         if not os.path.exists(self.datacard_dir): os.mkdir(self.datacard_dir)
         if not os.path.exists(self.result_dir)  : os.mkdir(self.result_dir)
@@ -68,7 +72,8 @@ class Configuration:
         print '[INFO] creating combined model'
         os.system(CREATE_MODEL_CMD.format(IN = output_datacard_path, OUT = self.output_model_path))
 
-    def run_combine(self, ntoys, cl = 0.90, method = 'HybridNew', stat = 'LHC', grid = 0.5):
+    def run_combine(self,   ntoys, cl = 0.90, method = 'HybridNew', stat = 'LHC', grid = 0.5):
+        
         global RUN_COMBINE_HYBRID_CMD
 
         print '[INFO] Running combine'

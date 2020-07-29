@@ -3,7 +3,7 @@ import math
 
 class Category:
     def __init__(self,  name, working_point, selection, wspace,
-                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = None):
+                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = 1):
         self.selection     = selection
         self.name          = name
         self.wspace        = wspace
@@ -49,7 +49,7 @@ class Category:
         self.bkg_dataset = ROOT.RooDataSet('bkg_dataset_%s' %self.label, '', self.bkg_tree, self.wspace.allVars(), bkg_selection).reduce(
             ROOT.RooArgSet(self.wspace.var("cand_refit_tau_mass")))
         self.norm_sig_integ = self.sig_dataset.sumEntries() * self.sig_norm
-        self.norm_bkg_integ = self.bkg_dataset.numEntries()
+        self.norm_bkg_integ = self.bkg_dataset.sumEntries()
 
     def fit_model(self):
         '''
@@ -60,8 +60,10 @@ class Category:
 
         self.load_files()
         
-        self.fit_sig()
         self.fit_bkg()
+        self.fit_sig()
+
+        self.frame.GetYaxis().SetRangeUser(0., 12.)
 
         self.frame.Draw()
 
@@ -105,9 +107,9 @@ class Category:
         self.sig_fit_results =  self.wspace.pdf('sig').fitTo(self.sig_dataset,  ROOT.RooFit.Range('sig_region') ,
                                                                                 ROOT.RooFit.Save()              , 
                                                                                 ROOT.RooFit.SumW2Error(True)    )
-        self.sig_frame = self.wspace.var('cand_refit_tau_mass').frame()
         self.sig_dataset.plotOn(self.frame              , 
-            #ROOT.RooFit.Binning(self.nbins)             , 
+            #ROOT.RooFit.Binning(self.nbins)             ,
+            ROOT.RooFit.Rescale(self.sig_norm)          ,
             ROOT.RooFit.DrawOption('B')                 , 
             ROOT.RooFit.DataError(ROOT.RooAbsData.None) , 
             ROOT.RooFit.XErrorSize(0)                   , 
@@ -129,11 +131,10 @@ class Category:
         '''
         write the combine datacard from the pre-fitted roofit model
         '''
-        ## FIXME
+        ## FIXED
         ## bypass the incorrect mcweights given at ntuple production. Should be fixed
         #BYPASS = (90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7)
-        BYPASS = 90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7
-
+        #import pdb; pdb.set_trace()
         with open('datacards/datacard_%s.txt' %self.label, 'w') as card:
             card.write(
 '''
@@ -166,7 +167,7 @@ a0_{cat}      param   {slopeval:.4f} {slopeerr:.4f}
          obs      = self.norm_bkg_integ if self.blind==False else -1,
          signal   = self.norm_sig_integ,
          bkg      = self.wspace.var("nbkg").getVal(),
-         mcstat   = 1. + math.sqrt(self.norm_sig_integ/BYPASS)/self.norm_sig_integ*BYPASS,
+         mcstat   = 1. + math.sqrt(self.norm_sig_integ / self.sig_norm) / (self.norm_sig_integ / self.sig_norm),
          mu_id    = 1, #1.044  if 'barrel' in args.category else 1.078,
          mu_hlt   = 1, #1.012  if 'barrel' in args.category else 1.040,
          trk_hlt  = 1, #1.0086 if 'barrel' in args.category else 1.0086,

@@ -6,6 +6,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--bdt_cut_barrel', default = 0.996    , type = float)
 parser.add_argument('--bdt_cut_endcap', default = 0.996    , type = float)
 parser.add_argument('--outdir'        , default = 'result' , type = str  )
+parser.add_argument('--workdir'       , default = '.'      , type = str  )
 parser.add_argument('--batch', action = 'store_true')
 args = parser.parse_args()
 
@@ -22,31 +23,39 @@ sig_range   = (1.72, 1.84)
 right_range = (1.84, 2.0)
 left_range  = (1.6, 1.72)
 nbins       = 40
+MC_NORM = 90480./(390032 + 381627)*(8580+11370)*0.1138/0.1063*1E-7
+#MC_NORM = 1
 
-baseline =  "   (   ((abs(cand_refit_mass12-1.020)<0.02)*(cand_charge12==0))    + \
+baseline =  "   ((  ((abs(cand_refit_mass12-1.020)<0.02)*(cand_charge12==0))    + \
                     ((abs(cand_refit_mass13-1.020)<0.02)*(cand_charge13==0))    + \
-                    ((abs(cand_refit_mass23-1.020)<0.02)*(cand_charge23==0))    ) == 0"
+                    ((abs(cand_refit_mass23-1.020)<0.02)*(cand_charge23==0))    ) == 0)"
 
-baseline += " & (   ((abs(cand_refit_mass12-0.782)<0.02)*(cand_charge12==0))    +\
-                    ((abs(cand_refit_mass13-0.782)<0.02)*(cand_charge13==0))    +\
-                    ((abs(cand_refit_mass23-0.782)<0.02)*(cand_charge23==0))    ) == 0"
+#baseline += " & ((  ((abs(cand_refit_mass12-0.782)<0.02)*(cand_charge12==0))    +\
+#                    ((abs(cand_refit_mass13-0.782)<0.02)*(cand_charge13==0))    +\
+#                    ((abs(cand_refit_mass23-0.782)<0.02)*(cand_charge23==0))    ) == 0)"
 
-baseline += " & abs(cand_charge) == 1 & abs(cand_refit_tau_mass - 1.8) < 0.2"
+baseline += " & ((  ((abs(cand_refit_mass12-0.547)<0.02)*(cand_charge12==0))    +\
+                    ((abs(cand_refit_mass13-0.547)<0.02)*(cand_charge13==0))    +\
+                    ((abs(cand_refit_mass23-0.547)<0.02)*(cand_charge23==0))    ) == 0)"
+
+baseline += " & (abs(cand_charge) == 1 & abs(cand_refit_tau_mass - 1.8) < 0.2)"
+#baseline = "abs(cand_charge) == 1 & abs(cand_refit_tau_mass - 1.8) < 0.2"
 baseline = ' '.join(baseline.split())
 
 
-path_data = "samples/background_10jan2020.root"
-path_mc   = "samples/signal_10jan2020.root"
+path_data = "samples/background_26may2020.root"
+path_mc   = "samples/signal_26may2020.root"
 
 ## CREATE THE WORKSPACE
 ##
 wspace = ROOT.RooWorkspace('wspace')
 
+## NOTE careful with the ranges
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_mass', '3-#mu mass'          , mass_range[0], mass_range[1], 'GeV'))
 getattr(wspace, 'import')(ROOT.RooRealVar('bdt'                , 'bdt'                 , -1 , 1))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_charge'        , 'charge'              , -4 , 4))
-getattr(wspace, 'import')(ROOT.RooRealVar('mcweight'           , 'mcweight'            ,  0., 5))
-getattr(wspace, 'import')(ROOT.RooRealVar('weight'             , 'weight'              ,  0., 20))  ## NOTE careful with the ranges
+getattr(wspace, 'import')(ROOT.RooRealVar('mcweight'           , 'mcweight'            ,  0., 1000))    ## MC PU and SFs weights
+#getattr(wspace, 'import')(ROOT.RooRealVar('weight'             , 'weight'              ,  0., 1000))   ## NOTE NOT these! These are the mass-flattening weights!
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_eta' , 'cand_refit_tau_eta'  , -5., 5))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_mass12'  , 'cand_refit_mass12'   ,  0., 2))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_mass13'  , 'cand_refit_mass13'   ,  0., 2))
@@ -83,11 +92,10 @@ getattr(wspace, 'import')(expomodel)
 ##
 
 ## NOTE match exactly Riccardo's script (round norm factor to float)
-FACTOR = float('%f' %(90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7))  / (90480./2.e6*(8580+11370)*0.1138/0.1063*1E-7)
+#FACTOR = float('%f' %(90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7))  / (90480./2.e6*(8580+11370)*0.1138/0.1063*1E-7)
 
 cfg = Configuration(baseline = baseline, bkg_file_path = path_data, sig_file_path = path_mc, tree_name = 'tree',
-    sig_norm   = FACTOR, ## fix small bug in ntuple production (wrong norm at ntuple definition)
-    result_dir = args.outdir,
+    result_dir = args.outdir, work_dir = args.workdir, sig_norm = MC_NORM,
 )
 
 barrel = Category(name = 'barrel', working_point = str(args.bdt_cut_barrel), selection = "bdt > {CUT} & abs(cand_refit_tau_eta) <  1.6".format(CUT = args.bdt_cut_barrel), wspace = wspace.Clone())
@@ -101,4 +109,4 @@ cfg.add_category(endcap)
 cfg.fit_model()
 cfg.write_datacards()
 cfg.combine_datacards()
-cfg.run_combine(ntoys = 5000)
+cfg.run_combine(ntoys = 5000, grid = 0.5)
