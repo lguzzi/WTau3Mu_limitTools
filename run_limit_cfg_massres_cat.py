@@ -43,8 +43,8 @@ baseline += " & abs(cand_charge) == 1 & abs(cand_refit_tau_mass - 1.8) < 0.2"
 baseline = ' '.join(baseline.split())
 
 
-path_data = "samples/background_26may2020.root"
-path_mc   = "samples/signal_26may2020.root"
+path_data = '/gwpool/users/alanteri/tesi/training/ntuples/bkg_20200729_aggregate.root'
+path_mc   = "/gwpool/users/alanteri/tesi/training/ntuples/sig_20200729_aggregate.root"
 
 ## CREATE THE WORKSPACE
 ##
@@ -52,7 +52,9 @@ wspace = ROOT.RooWorkspace('wspace')
 
 ## NOTE careful with the ranges
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_mass', '3-#mu mass'          , mass_range[0], mass_range[1], 'GeV'))
-getattr(wspace, 'import')(ROOT.RooRealVar('bdt'                , 'bdt'                 , -1 , 1))
+getattr(wspace, 'import')(ROOT.RooRealVar('bdt_lo'             , 'bdt_lo'              , 0 , 1))
+getattr(wspace, 'import')(ROOT.RooRealVar('bdt_mi'             , 'bdt_mi'              , 0 , 1))
+getattr(wspace, 'import')(ROOT.RooRealVar('bdt_hi'             , 'bdt_hi'              , 0 , 1))
 getattr(wspace, 'import')(ROOT.RooRealVar('cand_charge'        , 'charge'              , -4 , 4))
 getattr(wspace, 'import')(ROOT.RooRealVar('mcweight'           , 'mcweight'            ,  0., 1000))    ## MC PU and SFs weights
 #getattr(wspace, 'import')(ROOT.RooRealVar('weight'             , 'weight'              ,  0., 1000))   ## NOTE NOT these! These are the mass-flattening weights!
@@ -72,6 +74,7 @@ getattr(wspace, 'import')(ROOT.RooRealVar('mu3_hlt_doublemu3_trk_tau3mu_type', '
 getattr(wspace, 'import')(ROOT.RooRealVar('mu1_refit_muonid_tight', 'mu1_refit_muonid_tight', 0 , 1))
 getattr(wspace, 'import')(ROOT.RooRealVar('mu2_refit_muonid_tight', 'mu2_refit_muonid_tight', 0 , 1))
 getattr(wspace, 'import')(ROOT.RooRealVar('mu3_refit_muonid_tight', 'mu3_refit_muonid_tight', 0 , 1))
+getattr(wspace, 'import')(ROOT.RooRealVar('cand_refit_tau_massE'  , 'cand_refit_tau_massE'  , 0 , 1))
 
 wspace.var("cand_refit_tau_mass").setBins(nbins)
 wspace.var("cand_refit_tau_mass").setRange("left"  , *left_range )
@@ -95,16 +98,16 @@ cfg = Configuration(baseline = baseline, bkg_file_path = path_data, sig_file_pat
 )
 
 low_sel = ' & '.join([
-    '( bdt_ > {BDT} )'.format(BDT = args.bdt_low),
+    '( bdt_lo > {BDT} )'.format(BDT = args.bdt_low),
     '( (sqrt(cand_refit_tau_massE) / cand_refit_tau_mass) <= {IWP} )'.format(IWP = args.inner),
 ])
 mid_sel = ' & '.join([
-    '( bdt_ > {BDT} )'.format(BDT = args.bdt_mid),
+    '( bdt_mi > {BDT} )'.format(BDT = args.bdt_mid),
     '( (sqrt(cand_refit_tau_massE) / cand_refit_tau_mass) >  {IWP} )'.format(IWP = args.inner),
     '( (sqrt(cand_refit_tau_massE) / cand_refit_tau_mass) <= {OWP} )'.format(OWP = args.outer),
 ])
 hig_sel = ' & '.join([
-    '( bdt_ > {BDT} )'.format(BDT = args.bdt_hig),
+    '( bdt_hi > {BDT} )'.format(BDT = args.bdt_hig),
     '( (sqrt(cand_refit_tau_massE) / cand_refit_tau_mass) >  {OWP} )'.format(OWP = args.outer),
 ])
 
