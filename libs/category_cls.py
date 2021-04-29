@@ -1,15 +1,20 @@
 import ROOT
 import math
 
+class Systematics:
+    def __init__(self, name, distribution, value):
+        self.name = name
+        self.distribution = distribution
+        self.value = value
+
 class Category:
     def __init__(self,  name, working_point, selection, wspace,
-                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = 1):
+                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = 1, useLabel = True):
         self.selection     = selection
         self.name          = name
         self.wspace        = wspace
         self.working_point = working_point
-        self.label         = ''.join([self.name, self.working_point])
-
+        self.label         = ''.join([self.name, self.working_point]) if useLabel else self.name
 
         self.blind = blind
         self.mass_range = (self.wspace.var('cand_refit_tau_mass').getMin(), self.wspace.var('cand_refit_tau_mass').getMax())
@@ -21,11 +26,19 @@ class Category:
         self.pfd_dir       = pdf_dir
         self.sig_norm      = sig_norm
 
+        self.systematics = []
+
+        self.datacard_dir  = '/'.join(['./', 'datacards'])
+        self.result_dir    = '/'.join(['./', 'results'])
+        self.workspace_dir = '/'.join(['./', 'workspaces'])
+
+    def add_systematics(self, syst):
+        for se in syst:
+            self.systematics.append(se)
     def set_sig_file_path(self, file_path): self.sig_file_path = file_path
     def set_bkg_file_path(self, file_path): self.bkg_file_path = file_path
     def set_tree_name    (self, tree_name): self.tree_name     = tree_name
     def set_pdf_dir      (self, pdf_dir  ): self.pdf_dir       = pdf_dir
-    def set_sig_norm     (self, sig_norm ): self.sig_norm      = sig_norm
     def update_selection (self, baseline ): self.selection     = ' & '.join([self.selection, baseline])
 
     def load_files(self):
@@ -43,8 +56,9 @@ class Category:
             ROOT.RooArgSet(self.wspace.var("cand_refit_tau_mass")), 
             "cand_refit_tau_mass > %s & cand_refit_tau_mass < %s" %(self.mass_range[0], self.mass_range[1])
         )
+        #import pdb; pdb.set_trace()
 
-        blinder = 'abs(cand_refit_tau_mass-1.78)>0.06'
+        blinder = 'abs(cand_refit_tau_mass-1.78)>0.04'
         bkg_selection = ' & '.join([self.selection, blinder]) if self.blind else self.selection
         self.bkg_dataset = ROOT.RooDataSet('bkg_dataset_%s' %self.label, '', self.bkg_tree, self.wspace.allVars(), bkg_selection).reduce(
             ROOT.RooArgSet(self.wspace.var("cand_refit_tau_mass")))
@@ -77,7 +91,7 @@ class Category:
         '''
         self.out_wspace = ROOT.RooWorkspace('t3m_shapes')
 
-        self.output = ROOT.TFile.Open('datacards/datacard_%s.root' %self.label, 'RECREATE')
+        self.output = ROOT.TFile.Open('%s/CMS_T3M_13TeV_W_%s.root' %(self.workspace_dir, self.label), 'RECREATE')
         self.output.cd()
 
         self.out_wspace.factory('cand_refit_tau_mass[{RLO},{RHI}]'.format(  RLO = self.mass_range[0]    , 
@@ -135,16 +149,23 @@ class Category:
         ## bypass the incorrect mcweights given at ntuple production. Should be fixed
         #BYPASS = (90480./(1.E6 + 902.E3)*(8580+11370)*0.1138/0.1063*1E-7)
         #import pdb; pdb.set_trace()
-        with open('datacards/datacard_%s.txt' %self.label, 'w') as card:
+
+        category_systematics = '\n'.join([
+            '{NAM}          {DIS}                       {VAL}               -'.format(
+                NAM = sys.name, DIS = sys.distribution, VAL = sys.value
+            ) for sys in self.systematics
+        ])
+
+        with open('%s/CMS_T3MSignal_13TeV_W_%s.txt' %(self.datacard_dir, self.label), 'w') as card:
             card.write(
 '''
 imax 1 number of bins
 jmax * number of processes minus 1
 kmax * number of nuisance parameters
 --------------------------------------------------------------------------------
-shapes background    Wtau3mu_{cat}       datacard_{cat}.root t3m_shapes:bkg
-shapes signal        Wtau3mu_{cat}       datacard_{cat}.root t3m_shapes:sig
-shapes data_obs      Wtau3mu_{cat}       datacard_{cat}.root t3m_shapes:data_obs
+shapes background    Wtau3mu_{cat}       {wdr}/CMS_T3M_13TeV_W_{cat}.root t3m_shapes:bkg
+shapes signal        Wtau3mu_{cat}       {wdr}/CMS_T3M_13TeV_W_{cat}.root t3m_shapes:sig
+shapes data_obs      Wtau3mu_{cat}       {wdr}/CMS_T3M_13TeV_W_{cat}.root t3m_shapes:data_obs
 --------------------------------------------------------------------------------
 bin               Wtau3mu_{cat}
 observation       {obs:d}
@@ -154,31 +175,24 @@ process                                 signal              background
 process                                 0                   1
 rate                                    {signal:.4f}        {bkg:.4f}
 --------------------------------------------------------------------------------
-lumi          lnN                       1.017               -   
-xs_W          lnN                       1.037               -   
-br_Wtaunu     lnN                       1.0021              -   
-br_Wmunu      lnN                       1.0015              -   
+{SYS}
 mc_stat_{cat} lnN                       {mcstat:.4f}        -   
 --------------------------------------------------------------------------------
 bkgNorm_{cat} rateParam                 Wtau3mu_{cat}        background      1.
 a0_{cat}      param   {slopeval:.4f} {slopeerr:.4f}
 '''.format(
          cat      = self.label,
+         wdr      = self.workspace_dir,
          obs      = self.norm_bkg_integ if self.blind==False else -1,
          signal   = self.norm_sig_integ,
          bkg      = self.wspace.var("nbkg").getVal(),
          mcstat   = 1. + math.sqrt(self.norm_sig_integ / self.sig_norm) / (self.norm_sig_integ / self.sig_norm),
-         mu_id    = 1, #1.044  if 'barrel' in args.category else 1.078,
-         mu_hlt   = 1, #1.012  if 'barrel' in args.category else 1.040,
-         trk_hlt  = 1, #1.0086 if 'barrel' in args.category else 1.0086,
          slopeval = self.wspace.var("slope").getVal(),  
          slopeerr = self.wspace.var("slope").getError(),
+         SYS  = category_systematics,
          )
 )
 '''
- 
-
-mu_id{cat}    lnN                       {mu_id:.4f}         -   
 mu_hlt{cat}   lnN                       {mu_hlt:.4f}        -   
 trk_hlt{cat}  lnN                       {trk_hlt:.4f}       -   
 hlt_extrap    lnN                       1.05                -   
