@@ -1,5 +1,6 @@
 import ROOT
 import os
+from itertools import product
 from random import uniform
 from time import sleep
 
@@ -9,7 +10,7 @@ from time import sleep
 
 COMBINE_CMD = 'combineCards.py {IN} > {OUT}'
 CREATE_MODEL_CMD = 'text2workspace.py {IN} -o {OUT}'
-RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_{CL}_WP_{LABEL}.pdf' --rMin 0 --rMax 10 --setParameterRanges {PARAMETERS} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
+RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --fitNuisances={BLIND} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_{CL}_WP_{LABEL}.pdf' --rMin -1 --rMax 10 --setParameterRanges {PARAMETERS} {DISCRETE} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
 RUN_COMBINE_ASYMPTOTIC_CMD = 'combineTool.py -M AsymptoticLimits  --run blind  -d  {CARD} --cl {CL} | grep "50.0%:" > "{RES}/limit_combined_asymptotic_CL_{CL}_WP_{LABEL}.txt"'
 class Configuration:
     def __init__(self,  baseline, sig_file_path, bkg_file_path, tree_name,
@@ -84,12 +85,19 @@ class Configuration:
 
         label = '_'.join([cc.label for cc in self.categories])
 
-        parameters_selection =  ['bkgNorm_{CAT}=0,1000000:a0_{CAT}=-100,100'.format(CAT = cc.label) for cc in self.categories]
-        parameters_selection =  ':'.join(parameters_selection)
+        parameters  = [ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass"))))[i] for cat in self.          categories for i in range(ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass")))).getSize())] # What do a zoo owner and a Python data analyst have in common? They both import panda
+        parameters += [ROOT.RooArgList(cat.out_wspace.pdf('sig').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass"))))[i] for cat in self.categories for i in range(ROOT.RooArgList(cat.out_wspace.pdf('sig').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass")))).getSize())] # What was a python's first words? print("s"*10)
+        parameters  = [p for p in parameters if not p.isConstant() and not 'roomultipdf_cat_W' in p.GetName()]
         
+        parameters_selection  = ['bkgNorm_{}=0,1000000'.format(cat.label) for cat in self.categories]
+        parameters_selection += ['{P}={m},{M}'.format(P=p.GetName(), m=p.getMin(), M=p.getMax()) for p in parameters]
+        parameters_selection  =  ':'.join(parameters_selection)
+
+        discrete_profiling =  ','.join(['{}={}'.format("roomultipdf_cat_W_{}".format(cat.name), cat.out_wspace.pdf("bkg").getCurrentIndex()) for cat in self.categories])
         RUN_CMD = RUN_COMBINE_HYBRID_CMD.format(    LABEL       = label,
                                                     MODEL       = self.output_model_path,
                                                     NTOYS       = ntoys,
+                                                    BLIND       = int(all(not cc.blind for cc in self.categories)),
                                                     CL          = cl,
                                                     METHOD      = method,
                                                     STAT        = stat,
@@ -97,10 +105,13 @@ class Configuration:
                                                     PARAMETERS  = parameters_selection,
                                                     RES         = self.result_dir,
                                                     PDF         = self.pdf_dir,
+                                                    DISCRETE    = '--setParameters '+discrete_profiling if discrete_profiling else '',
         ) if not asymptotic else RUN_COMBINE_ASYMPTOTIC_CMD.format( CL    = cl, 
                                                                     CARD  = self.output_datacard_path,
                                                                     RES   = self.result_dir, 
                                                                     LABEL = label,
         )
-
+        print ">"*50
+        print RUN_CMD
+        print ">"*50
         os.system(RUN_CMD)

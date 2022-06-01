@@ -9,12 +9,16 @@ class Systematics:
 
 class Category:
     def __init__(self,  name, working_point, selection, wspace,
-                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = 1, useLabel = True):
+                        tree_name = None, sig_file_path = None, bkg_file_path = None, blind = True, pdf_dir = None, sig_norm = 1, useLabel = True,
+                        Z_frac = 0., sigma = 0.01, dp = False):
         self.selection     = selection
         self.name          = name
         self.wspace        = wspace
         self.working_point = working_point
         self.label         = ''.join([self.name, self.working_point]) if useLabel else self.name
+        self.Z_frac = Z_frac
+        self.sigma = sigma
+        self.discp = dp
 
         self.blind = blind
         self.mass_range = (self.wspace.var('cand_refit_tau_mass').getMin(), self.wspace.var('cand_refit_tau_mass').getMax())
@@ -62,7 +66,8 @@ class Category:
         bkg_selection = ' & '.join([self.selection, blinder]) if self.blind else self.selection
         self.bkg_dataset = ROOT.RooDataSet('bkg_dataset_%s' %self.label, '', self.bkg_tree, self.wspace.allVars(), bkg_selection).reduce(
             ROOT.RooArgSet(self.wspace.var("cand_refit_tau_mass")))
-        self.norm_sig_integ = self.sig_dataset.sumEntries() * self.sig_norm
+        self.sig_integ      = self.sig_dataset.sumEntries()
+        self.norm_sig_integ = self.sig_integ * self.sig_norm
         self.norm_bkg_integ = self.bkg_dataset.sumEntries()
 
     def fit_model(self):
@@ -96,16 +101,21 @@ class Category:
 
         self.out_wspace.factory('cand_refit_tau_mass[{RLO},{RHI}]'.format(  RLO = self.mass_range[0]    , 
                                                                             RHI = self.mass_range[1]   ))
-        self.out_wspace.factory('mean[{VAL}]' .format(  VAL = self.wspace.var('mean' ).getValV()))
-        self.out_wspace.factory('sigma[{VAL}]'.format(  VAL = self.wspace.var('sigma').getValV()))
+        self.out_wspace.factory('mean[{VAL}]'  .format(  VAL = self.wspace.var('mean').getValV()))
+        #self.out_wspace.factory('sigma[{VAL}]' .format(  VAL = self.wspace.var('sigma' ).getValV()))
+        self.out_wspace.factory('sigma_{CAT}[{VAL},0.005,0.1]'.format(CAT = self.label, VAL = self.wspace.var('sigma').getValV(), ERR = self.wspace.var('sigma').getError()))
 
-        self.out_wspace.factory("Exponential::bkg(cand_refit_tau_mass, a0_{CAT}[{VAL},{ERR},{ERR}])".format(CAT = self.label,
-                                                                                                            VAL = self.wspace.var('slope').getValV()    ,
-                                                                                                            ERR = self.wspace.var('slope').getError()  ))
-        self.out_wspace.factory('RooGaussian::sig(cand_refit_tau_mass, mean, sigma)')
+        if not self.discp:
+            self.out_wspace.factory("Exponential::bkg(cand_refit_tau_mass, a0_{CAT}[{VAL},-100, 100])".format(CAT = self.label,
+                                                                                                                VAL = self.wspace.var('slope').getValV()    ,
+                                                                                                                ERR = self.wspace.var('slope').getError()  ))
+        else:
+            getattr(self.out_wspace, 'import')(self.wspace.pdf('bkg'))
+        #self.out_wspace.factory('RooGaussian::sig(cand_refit_tau_mass, mean, sigma)')
+        self.out_wspace.factory('RooGaussian::sig(cand_refit_tau_mass, mean, sigma_{})'.format(self.label))
         
         self.out_wspace.var('mean' ).setConstant()
-        self.out_wspace.var('sigma').setConstant()
+        #self.out_wspace.var('sigma').setConstant()
 
         data = ROOT.RooDataSet('data_obs', 'data_obs', self.bkg_dataset, ROOT.RooArgSet(self.wspace.var('cand_refit_tau_mass')))
         getattr(self.out_wspace, 'import')(data)
@@ -118,7 +128,7 @@ class Category:
         self.output.Close()
 
     def fit_sig(self):
-        self.sig_fit_results =  self.wspace.pdf('sig').fitTo(self.sig_dataset,  ROOT.RooFit.Range('sig_region') ,
+        self.sig_fit_results =  self.wspace.pdf('sig').fitTo(self.sig_dataset,  ROOT.RooFit.Range('prefit_range') ,
                                                                                 ROOT.RooFit.Save()              , 
                                                                                 ROOT.RooFit.SumW2Error(True)    )
         self.sig_dataset.plotOn(self.frame              , 
@@ -130,16 +140,57 @@ class Category:
             ROOT.RooFit.LineWidth(2)                    ,
             ROOT.RooFit.FillColor(ROOT.kRed)            ,
             ROOT.RooFit.FillStyle(3003)                 ) 
+        
         self.wspace.pdf('sig').plotOn(self.frame, ROOT.RooFit.LineColor(ROOT.kRed))
+        
+        can = ROOT.TCanvas()
+        frame = self.wspace.var("cand_refit_tau_mass").frame(40)
+        self.sig_dataset.plotOn(frame)
+        self.wspace.pdf('sig').plotOn(frame, ROOT.RooFit.LineColor(ROOT.kRed))
+        frame.Draw()
+        can.SaveAs("{}/prefit_signal_{}.pdf".format(self.pdf_dir, self.name), "pdf")
 
     def fit_bkg(self):
-
-        self.bkg_fit_results = self.wspace.pdf('bkg').fitTo(self.bkg_dataset,   ROOT.RooFit.Range('left,right') , 
-                                                                                ROOT.RooFit.Save()              , 
-                                                                                ROOT.RooFit.SumW2Error(True)    )
+        frame = self.wspace.var("cand_refit_tau_mass").frame(40)
+        leg = ROOT.TLegend()
+        self.bkg_dataset.plotOn(frame,  #ROOT.RooFit.Binning(self.nbins)  , 
+                                        ROOT.RooFit.MarkerSize(1.)  )
         self.bkg_dataset.plotOn(self.frame, #ROOT.RooFit.Binning(self.nbins)  , 
                                             ROOT.RooFit.MarkerSize(1.)  )
+
+        if not self.discp:
+            self.bkg_fit_results = self.wspace.pdf('bkg').fitTo(self.bkg_dataset,   ROOT.RooFit.Range('left,right') , 
+                                                                                    ROOT.RooFit.Save()              , 
+                                                                                    ROOT.RooFit.SumW2Error(True)    ,
+                                                                                    ROOT.RooFit.Extended(True)      )
+        else:
+            bkg_pdf = self.wspace.pdf("bkg").getCurrentPdf()
+            getattr(self.wspace, 'import')(ROOT.RooRealVar("nbkg", "",  2000, 0, 550000))
+            ext_bkg = ROOT.RooAddPdf('bkg', '', ROOT.RooArgList(bkg_pdf), ROOT.RooArgList(self.wspace.var("nbkg")))
+            self.bkg_fit_results = ext_bkg.fitTo(self.bkg_dataset,  ROOT.RooFit.Range('left,right') , 
+                                                                    ROOT.RooFit.Save()              , 
+                                                                    ROOT.RooFit.SumW2Error(True)    ,
+                                                                    ROOT.RooFit.Extended(True)      )
+        #for i in range(getattr(self.wspace.pdf('bkg'), 'getNumPdfs', lambda: 0)()):
+        #    pdf = self.wspace.pdf('bkg').getPdf(i)
+        #    num = ROOT.RooRealVar("num"+str(i) if i > 0 else 'nbkg', '', 2000, 0, 550000)
+        #    epdf = ROOT.RooAddPdf("ext."+pdf.GetName(), '',  ROOT.RooArgList(pdf),  ROOT.RooArgList(num))
+        #    getattr(self.wspace, 'import')(epdf)
+        #    res = self.wspace.pdf(epdf.GetName()).fitTo(self.bkg_dataset,   ROOT.RooFit.Range('left,right') , 
+        #                                        ROOT.RooFit.Save()              , 
+        #                                        ROOT.RooFit.SumW2Error(True)    ,
+        #                                        ROOT.RooFit.Extended(True)      )
+        #    self.wspace.pdf(epdf.GetName()).plotOn(frame, ROOT.RooFit.LineColor(i+1), ROOT.RooFit.Name(self.wspace.pdf(epdf.GetName()).GetName()))
+        #    leg.AddEntry(frame.findObject(self.wspace.pdf(epdf.GetName()).GetName()), self.wspace.pdf(epdf.GetName()).GetName(), 'l')
+        
         self.wspace.pdf('bkg').plotOn(self.frame, ROOT.RooFit.LineColor(ROOT.kBlue))
+
+        can = ROOT.TCanvas()
+        self.wspace.pdf('bkg').plotOn(frame, ROOT.RooFit.LineColor(2), ROOT.RooFit.Name('prefit'), ROOT.RooFit.LineStyle(ROOT.kDashed))
+        leg.AddEntry(frame.findObject('prefit'), 'bkg pre-fit', 'l')
+        frame.Draw()
+        leg.Draw("SAME")
+        can.SaveAs("{}/prefit_background_{}.pdf".format(self.pdf_dir, self.name), "pdf")
 
     def write_datacard(self):
         '''
@@ -155,7 +206,7 @@ class Category:
                 NAM = sys.name, DIS = sys.distribution, VAL = sys.value
             ) for sys in self.systematics
         ])
-
+        aset = ROOT.RooArgSet(self.wspace.var("cand_refit_tau_mass"))
         with open('%s/CMS_T3MSignal_13TeV_W_%s.txt' %(self.datacard_dir, self.label), 'w') as card:
             card.write(
 '''
@@ -179,22 +230,26 @@ rate                                    {signal:.4f}        {bkg:.4f}
 mc_stat_{cat} lnN                       {mcstat:.4f}        -   
 --------------------------------------------------------------------------------
 bkgNorm_{cat} rateParam                 Wtau3mu_{cat}        background      1.
-a0_{cat}      param   {slopeval:.4f} {slopeerr:.4f}
+sigma_{cat} param {sigmaval:.4f} {sigmaerr:.4f}
+{bkg_pdf}
 '''.format(
-         cat      = self.label,
-         wdr      = self.workspace_dir,
-         obs      = self.norm_bkg_integ if self.blind==False else -1,
-         signal   = self.norm_sig_integ,
-         bkg      = self.wspace.var("nbkg").getVal(),
-         mcstat   = 1. + math.sqrt(self.norm_sig_integ / self.sig_norm) / (self.norm_sig_integ / self.sig_norm),
-         slopeval = self.wspace.var("slope").getVal(),  
-         slopeerr = self.wspace.var("slope").getError(),
-         SYS  = category_systematics,
-         )
+        cat      = self.label,
+        wdr      = self.workspace_dir,
+        obs      = int(self.norm_bkg_integ) if self.blind==False else -1, # NOTE: norm_bkg_integ is actually the obsrved entries in the full range when running unblinded
+        signal   = self.norm_sig_integ*(1.+self.Z_frac),
+        bkg      = self.wspace.var("nbkg").getVal(),
+        # if testing non-extended prefit, extrapolate the background from the pdf integral ratio
+        #bkg      = self.bkg_dataset.sumEntries()*self.wspace.pdf('bkg').createIntegral(aset, ROOT.RooFit.NormSet(aset), ROOT.RooFit.Range("mass_range")).getValV()/self.wspace.pdf('bkg').createIntegral(aset, ROOT.RooFit.NormSet(aset), ROOT.RooFit.Range("left,right")).getValV(),
+        # mcstat is the relative uncertainty associated to 1 / N_GEN. Do the math and find sigma_{1/N_GEN} / (1/N_GEN) = 1 / sqrt(N_GEN)
+        mcstat   = 1. + (1.-self.Z_frac) /  math.sqrt(self.sig_integ),
+        sigmaval = self.wspace.var('sigma').getVal(),
+        sigmaerr = self.wspace.var('sigma').getVal()*self.sigma,
+        SYS  = category_systematics,
+        bkg_pdf = 'a0_{cat}      flatParam   {slopeval:.4f}'.format(
+            slopeval = self.wspace.var("slope").getVal(),
+            slopeerr = self.wspace.var("slope").getError(),
+            cat      = self.name,
+           ) if not self.discp else 'roomultipdf_cat_W_{} discrete'.format(self.name)
+        )
 )
-'''
-mu_hlt{cat}   lnN                       {mu_hlt:.4f}        -   
-trk_hlt{cat}  lnN                       {trk_hlt:.4f}       -   
-hlt_extrap    lnN                       1.05                -   
-'''
         
