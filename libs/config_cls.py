@@ -9,9 +9,10 @@ from time import sleep
 ## - check difference in ROOT and RooFit Integral() value (difference of about 1e-4) [DONE]
 
 COMBINE_CMD = 'combineCards.py {IN} > {OUT}'
-CREATE_MODEL_CMD = 'text2workspace.py {IN} -o {OUT}'
-RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --testStat={STAT} --fitNuisances={BLIND} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_{CL}_WP_{LABEL}.pdf' --rMin -1 --rMax 10 --setParameterRanges {PARAMETERS} {DISCRETE} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
-RUN_COMBINE_ASYMPTOTIC_CMD = 'combineTool.py -M AsymptoticLimits  --run blind  -d  {CARD} --cl {CL} | grep "50.0%:" > "{RES}/limit_combined_asymptotic_CL_{CL}_WP_{LABEL}.txt"'
+CREATE_MODEL_CMD = 'text2workspace.py --X-assign-flatParam-prior {IN} -o {OUT}'
+RUN_COMBINE_HYBRID_CMD  = "combine -M {METHOD} --X-rtd MINIMIZER_freezeDisassociatedParams --testStat={STAT} --fitNuisances={BLIND} --frequentist {MODEL} -T {NTOYS} --expectedFromGrid {GRID} -C {CL}  --plot='{PDF}/limit_combined_hybridnew_{CL}_WP_{LABEL}.pdf' --rMin -1 --rMax 10 --setParameterRanges {PARAMETERS} {DISCRETE} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'"
+#RUN_COMBINE_HYBRID_CMD = "combine -M HybridNew {WSP} {BLI} --LHCmode LHC-limits --X-rtd MINIMIZER_freezeDisassociatedParams -T {TOY} -C {CL}  --plot='limit_combined_hybridnew_{CL}.pdf' --rMin {r} --rMax {R} {PAR} | grep Limit >  '{RES}/limit_combined_hybridnew_CL_{CL}_central_WP_{LABEL}.txt'""
+RUN_COMBINE_ASYMPTOTIC_CMD = 'combineTool.py -M AsymptoticLimits  --run blind  -d  {CARD} --cl {CL} | grep Expected > "{RES}/limit_combined_asymptotic_CL_{CL}_WP_{LABEL}.txt"'
 class Configuration:
     def __init__(self,  baseline, sig_file_path, bkg_file_path, tree_name,
                         result_dir = 'central', work_dir = '.',
@@ -66,7 +67,7 @@ class Configuration:
 
         print '[INFO] merging datacards'
         
-        inputs = ['{NAM}={DTC}/CMS_T3MSignal_13TeV_W_{CAT}.txt'.format(DTC = self.datacard_dir, NAM = cc.name, CAT = cc.label) for cc in self.categories]
+        inputs = ['{NAM}={DTC}/CMS_T3MSignal_13TeV_W_{CAT}.txt'.format(DTC = self.datacard_dir, NAM = cc.name, CAT = cc.name) for cc in self.categories]
         input_str = ' '.join(inputs)
         
         self.output_datacard_path   = '/'.join([self.datacard_dir , 'CMS_T3MSignal_13TeV_W_Combined.txt'])
@@ -74,7 +75,6 @@ class Configuration:
         #output_datacard_path   = self.datacard_dir + '/datacard_comb_' + '_'.join([cc.label for cc in self.categories]) + '.txt'
         #self.output_model_path = self.datacard_dir + '/model_comb_'    + '_'.join([cc.label for cc in self.categories]) + '.root'
         os.system(COMBINE_CMD.format(IN = input_str, OUT = self.output_datacard_path))
-
         print '[INFO] creating combined model'
         os.system(CREATE_MODEL_CMD.format(IN = self.output_datacard_path, OUT = self.output_model_path))
 
@@ -83,17 +83,18 @@ class Configuration:
 
         print '[INFO] Running combine'
 
-        label = '_'.join([cc.label for cc in self.categories])
+        label = '_'.join([cc.name for cc in self.categories])
 
-        parameters  = [ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass"))))[i] for cat in self.          categories for i in range(ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass")))).getSize())] # What do a zoo owner and a Python data analyst have in common? They both import panda
+        parameters  = [ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass"))))[i] for cat in self.categories for i in range(ROOT.RooArgList(cat.out_wspace.pdf('bkg').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass")))).getSize())] # What do a zoo owner and a Python data analyst have in common? They both import panda
         parameters += [ROOT.RooArgList(cat.out_wspace.pdf('sig').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass"))))[i] for cat in self.categories for i in range(ROOT.RooArgList(cat.out_wspace.pdf('sig').getParameters(ROOT.RooArgSet(cat.wspace.var("cand_refit_tau_mass")))).getSize())] # What was a python's first words? print("s"*10)
         parameters  = [p for p in parameters if not p.isConstant() and not 'roomultipdf_cat_W' in p.GetName()]
         
-        parameters_selection  = ['bkgNorm_{}=0,1000000'.format(cat.label) for cat in self.categories]
+        parameters_selection  = ['bkgNorm_{}=0,1000000'.format(cat.name) for cat in self.categories]
         parameters_selection += ['{P}={m},{M}'.format(P=p.GetName(), m=p.getMin(), M=p.getMax()) for p in parameters]
         parameters_selection  =  ':'.join(parameters_selection)
 
-        discrete_profiling =  ','.join(['{}={}'.format("roomultipdf_cat_W_{}".format(cat.name), cat.out_wspace.pdf("bkg").getCurrentIndex()) for cat in self.categories])
+        discrete_profiling =  ','.join(['{}={}'.format("roomultipdf_cat_W_{}".format(cat.name), cat.out_wspace.pdf("bkg").getCurrentIndex()) for cat in self.categories if cat.discp])
+        isblind=all(cc.blind for cc in self.categories)
         RUN_CMD = RUN_COMBINE_HYBRID_CMD.format(    LABEL       = label,
                                                     MODEL       = self.output_model_path,
                                                     NTOYS       = ntoys,
